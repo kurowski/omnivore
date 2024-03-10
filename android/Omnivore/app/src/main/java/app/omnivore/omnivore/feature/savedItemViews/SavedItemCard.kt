@@ -15,7 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -122,7 +122,7 @@ fun SavedItemCard(
                 }
         }
 
-        Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+        HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
@@ -159,36 +159,6 @@ fun readingProgress(item: SavedItemWithLabelsAndHighlights): String {
     }
     return ""
 }
-
-//var highlightsText: String {
-//  item.hig ?.let {
-//  if let highlights = item.highlights, highlights.count > 0 {
-//    let fmted = LocalText.pluralizedText(key: "number_of_highlights", count: highlights.count)
-//    if item.wordsCount > 0 {
-//      return " • \(fmted)"
-//    }
-//    return fmted
-//  }
-//  return ""
-//}
-//
-//var notesText: String {
-//  let notes = item.highlights?.filter { item in
-//          if let highlight = item as? Highlight {
-//            return !(highlight.annotation ?? "").isEmpty
-//          }
-//    return false
-//  }
-//
-//  if let notes = notes, notes.count > 0 {
-//    let fmted = LocalText.pluralizedText(key: "number_of_notes", count: notes.count)
-//    if item.wordsCount > 0 {
-//      return " • \(fmted)"
-//    }
-//    return fmted
-//  }
-//  return ""
-//}
 
 
 enum class FlairIcon(

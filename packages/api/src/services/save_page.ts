@@ -1,7 +1,11 @@
 import { Readability } from '@omnivore/readability'
 import { DeepPartial } from 'typeorm'
 import { Highlight } from '../entity/highlight'
-import { LibraryItem, LibraryItemState } from '../entity/library_item'
+import {
+  DirectionalityType,
+  LibraryItem,
+  LibraryItemState,
+} from '../entity/library_item'
 import { User } from '../entity/user'
 import { homePageURL } from '../env'
 import {
@@ -11,6 +15,7 @@ import {
   SavePageInput,
   SaveResult,
 } from '../generated/graphql'
+import { Merge } from '../util'
 import { enqueueThumbnailJob } from '../utils/createTask'
 import {
   cleanUrl,
@@ -24,7 +29,7 @@ import { parsePreparedContent } from '../utils/parser'
 import { contentReaderForLibraryItem } from '../utils/uploads'
 import { createPageSaveRequest } from './create_page_save_request'
 import { createHighlight } from './highlights'
-import { createAndSaveLabelsInLibraryItem } from './labels'
+import { createAndAddLabelsToLibraryItem } from './labels'
 import { createOrUpdateLibraryItem } from './library_item'
 
 // where we can use APIs to fetch their underlying content.
@@ -61,10 +66,13 @@ const shouldParseInBackend = (input: SavePageInput): boolean => {
   )
 }
 
+export type SavePageArgs = Merge<
+  SavePageInput,
+  { feedContent?: string; previewImage?: string; author?: string }
+>
+
 export const savePage = async (
-  input: SavePageInput & {
-    finalUrl?: string
-  },
+  input: SavePageArgs,
   user: User
 ): Promise<SaveResult> => {
   const [slug, croppedPathname] = createSlug(input.url, input.title)
@@ -100,6 +108,8 @@ export const savePage = async (
     pageInfo: {
       title: input.title,
       canonicalUrl: input.url,
+      previewImage: input.previewImage,
+      author: input.author,
     },
   })
 
@@ -119,6 +129,8 @@ export const savePage = async (
     state: input.state || undefined,
     rssFeedUrl: input.rssFeedUrl,
     folder: input.folder,
+    feedContent: input.feedContent,
+    dir: parseResult.parsedContent?.dir,
   })
   const isImported =
     input.source === 'csv-importer' || input.source === 'pocket'
@@ -128,12 +140,12 @@ export const savePage = async (
     itemToSave,
     user.id,
     undefined,
-    isImported,
-    input.finalUrl
+    isImported
   )
   clientRequestId = newItem.id
 
-  await createAndSaveLabelsInLibraryItem(
+  // merge labels
+  await createAndAddLabelsToLibraryItem(
     clientRequestId,
     user.id,
     input.labels,
@@ -158,6 +170,7 @@ export const savePage = async (
       libraryItem: { id: clientRequestId },
     }
 
+    // merge highlights
     try {
       await createHighlight(highlight, clientRequestId, user.id)
     } catch (error) {
@@ -195,6 +208,8 @@ export const parsedContentToLibraryItem = ({
   state,
   rssFeedUrl,
   folder,
+  feedContent,
+  dir,
 }: {
   url: string
   userId: string
@@ -214,8 +229,10 @@ export const parsedContentToLibraryItem = ({
   state?: ArticleSavingRequestStatus | null
   rssFeedUrl?: string | null
   folder?: string | null
+  feedContent?: string | null
+  dir?: string | null
 }): DeepPartial<LibraryItem> & { originalUrl: string } => {
-  logger.info('save_page: state', { url, state, itemId })
+  logger.info('save_page', { url, state, itemId })
   return {
     id: itemId || undefined,
     slug,
@@ -255,5 +272,11 @@ export const parsedContentToLibraryItem = ({
     folder: folder || 'inbox',
     archivedAt:
       state === ArticleSavingRequestStatus.Archived ? new Date() : null,
+    deletedAt: state === ArticleSavingRequestStatus.Deleted ? new Date() : null,
+    feedContent,
+    directionality:
+      dir?.toLowerCase() === 'rtl'
+        ? DirectionalityType.RTL
+        : DirectionalityType.LTR, // default to LTR
   }
 }

@@ -11,12 +11,20 @@ import {
   Worker,
 } from 'bullmq'
 import express, { Express } from 'express'
-import { SnakeNamingStrategy } from 'typeorm-naming-strategies'
 import { appDataSource } from './data_source'
 import { env } from './env'
+import { aiSummarize, AI_SUMMARIZE_JOB_NAME } from './jobs/ai-summarize'
 import { bulkAction, BULK_ACTION_JOB_NAME } from './jobs/bulk_action'
-import { CALL_WEBHOOK_JOB_NAME, callWebhook } from './jobs/call_webhook'
+import { callWebhook, CALL_WEBHOOK_JOB_NAME } from './jobs/call_webhook'
 import { findThumbnail, THUMBNAIL_JOB } from './jobs/find_thumbnail'
+import {
+  exportAllItems,
+  EXPORT_ALL_ITEMS_JOB_NAME,
+} from './jobs/integration/export_all_items'
+import {
+  exportItem,
+  EXPORT_ITEM_JOB_NAME,
+} from './jobs/integration/export_item'
 import { refreshAllFeeds } from './jobs/rss/refreshAllFeeds'
 import { refreshFeed } from './jobs/rss/refreshFeed'
 import { savePageJob } from './jobs/save_page'
@@ -34,7 +42,8 @@ import {
 import { updatePDFContentJob } from './jobs/update_pdf_content'
 import { redisDataSource } from './redis_data_source'
 import { CACHED_READING_POSITION_PREFIX } from './services/cached_reading_position'
-import { CustomTypeOrmLogger, logger } from './utils/logger'
+import { getJobPriority } from './utils/createTask'
+import { logger } from './utils/logger'
 
 export const QUEUE_NAME = 'omnivore-backend-queue'
 export const JOB_VERSION = 'v001'
@@ -103,6 +112,12 @@ export const createWorker = (connection: ConnectionOptions) =>
           return bulkAction(job.data)
         case CALL_WEBHOOK_JOB_NAME:
           return callWebhook(job.data)
+        case EXPORT_ITEM_JOB_NAME:
+          return exportItem(job.data)
+        case AI_SUMMARIZE_JOB_NAME:
+          return aiSummarize(job.data)
+        case EXPORT_ALL_ITEMS_JOB_NAME:
+          return exportAllItems(job.data)
       }
     },
     {
@@ -121,7 +136,7 @@ const setupCronJobs = async () => {
     SYNC_READ_POSITIONS_JOB_NAME,
     {},
     {
-      priority: 1,
+      priority: getJobPriority(SYNC_READ_POSITIONS_JOB_NAME),
       repeat: {
         every: 60_000,
       },
@@ -138,23 +153,6 @@ const main = async () => {
   redisDataSource.setOptions({
     cache: env.redis.cache,
     mq: env.redis.mq,
-  })
-
-  appDataSource.setOptions({
-    type: 'postgres',
-    host: env.pg.host,
-    port: env.pg.port,
-    schema: 'omnivore',
-    username: env.pg.userName,
-    password: env.pg.password,
-    database: env.pg.dbName,
-    logging: ['query', 'info'],
-    entities: [__dirname + '/entity/**/*{.js,.ts}'],
-    subscribers: [__dirname + '/events/**/*{.js,.ts}'],
-    namingStrategy: new SnakeNamingStrategy(),
-    logger: new CustomTypeOrmLogger(['query', 'info']),
-    connectTimeoutMS: 40000, // 40 seconds
-    maxQueryExecutionTime: 10000, // 10 seconds
   })
 
   // respond healthy to auto-scaler.
@@ -258,6 +256,16 @@ const main = async () => {
 
   process.on('SIGINT', () => gracefulShutdown('SIGINT'))
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
+
+  process.on('uncaughtException', function (err) {
+    // Handle the error safely
+    logger.error('Uncaught exception', err)
+  })
+
+  process.on('unhandledRejection', (reason, promise) => {
+    // Handle the error safely
+    logger.error('Unhandled Rejection at: Promise', { promise, reason })
+  })
 }
 
 // only call main if the file was called from the CLI and wasn't required from another module

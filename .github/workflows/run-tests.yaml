@@ -5,11 +5,13 @@ on:
       - main
     paths-ignore:
       - 'apple/**'
+      - 'android/**'
   pull_request:
     branches:
       - main
     paths-ignore:
       - 'apple/**'
+      - 'android/**'
 
 env:
   NEXT_PUBLIC_APP_ENV: prod
@@ -98,7 +100,8 @@ jobs:
     name: Build docker images
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v2
         with:
           fetch-depth: 0
       - name: Build the API docker image

@@ -2,7 +2,6 @@ import { Box, VStack, HStack, SpanBox } from '../../elements/LayoutPrimitives'
 import { LabelChip } from '../../elements/LabelChip'
 import type { LinkedItemCardProps } from './CardTypes'
 import { useCallback, useState } from 'react'
-import Link from 'next/link'
 import {
   AuthorInfoStyle,
   CardCheckbox,
@@ -14,7 +13,7 @@ import {
   FLAIR_ICON_NAMES,
 } from './LibraryCardStyles'
 import { sortedLabels } from '../../../lib/labelsSort'
-import { LIBRARY_LEFT_MENU_WIDTH } from '../../templates/homeFeed/LibraryFilterMenu'
+import { LIBRARY_LEFT_MENU_WIDTH } from '../../templates/navMenu/LibraryMenu'
 import { LibraryHoverActions } from './LibraryHoverActions'
 import {
   useHover,
@@ -82,6 +81,9 @@ export function LibraryListCard(props: LinkedItemCardProps): JSX.Element {
         '@media (min-width: 1600px)': {
           width: '1200px',
         },
+        '@media (max-width: 930px)': {
+          borderRadius: '0px',
+        },
       }}
       alignment="start"
       distribution="start"
@@ -100,7 +102,7 @@ export function LibraryListCard(props: LinkedItemCardProps): JSX.Element {
         }
       }}
     >
-      {!isTouchScreenDevice() && (
+      {!isTouchScreenDevice() && props.multiSelectMode == 'off' && (
         <Box
           ref={refs.setFloating}
           style={{ ...floatingStyles, zIndex: 3 }}

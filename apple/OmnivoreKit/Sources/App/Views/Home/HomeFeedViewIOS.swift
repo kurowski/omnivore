@@ -150,13 +150,15 @@ struct EmptyState: View {
       return AnyView(Group {
         Spacer()
 
-        VStack(alignment: .center, spacing: 20) {
-          Text("No results found for this query")
-            .font(Font.system(size: 18, weight: .bold))
+        if viewModel.showLoadingBar == .none {
+          VStack(alignment: .center, spacing: 20) {
+            Text("No results found for this query")
+              .font(Font.system(size: 18, weight: .bold))
+          }
+          .frame(minHeight: 400)
+          .frame(maxWidth: .infinity)
+          .padding()
         }
-        .frame(minHeight: 400)
-        .frame(maxWidth: .infinity)
-        .padding()
 
         Spacer()
       })
@@ -322,14 +324,6 @@ struct AnimatingCellHeight: AnimatableModifier {
           await viewModel.loadNewItems(dataService: dataService)
         }
       }
-      .onReceive(NotificationCenter.default.publisher(for: Notification.Name("PushJSONArticle"))) { notification in
-        guard let jsonArticle = notification.userInfo?["article"] as? JSONArticle else { return }
-        guard let objectID = dataService.persist(jsonArticle: jsonArticle) else { return }
-        guard let linkedItem = dataService.viewContext.object(with: objectID) as? Models.LibraryItem else { return }
-        viewModel.pushFeedItem(item: linkedItem)
-        viewModel.selectedItem = linkedItem
-        viewModel.linkIsActive = true
-      }
       .sheet(isPresented: $searchPresented) {
         LibrarySearchView(homeFeedViewModel: self.viewModel)
       }
@@ -493,7 +487,8 @@ struct AnimatingCellHeight: AnimatableModifier {
               options: PresentationLinkTransition.SlideTransitionOptions(edge: .trailing,
                                                                          options:
                                                                          PresentationLinkTransition.Options(
-                                                                           modalPresentationCapturesStatusBarAppearance: true
+                                                                           modalPresentationCapturesStatusBarAppearance: true,
+                                                                           preferredPresentationBackgroundColor: ThemeManager.currentBgColor
                                                                          ))),
             isPresented: $viewModel.presentWebContainer,
             destination: {
@@ -530,8 +525,13 @@ struct AnimatingCellHeight: AnimatableModifier {
           )
         } else {
           HomeFeedGridView(
+            listTitle: $listTitle,
+            isListScrolled: $isListScrolled,
+            prefersListLayout: $prefersListLayout,
+            isEditMode: $isEditMode,
+            selection: $selection,
             viewModel: viewModel,
-            isListScrolled: $isListScrolled
+            showFeatureCards: showFeatureCards
           )
         }
       }.sheet(isPresented: $viewModel.showLabelsSheet) {
@@ -572,10 +572,6 @@ struct AnimatingCellHeight: AnimatableModifier {
           .frame(width: nil, height: 0.5, alignment: .bottom)
           .foregroundColor(isListScrolled && UIDevice.isIPhone ? Color(hex: "#3D3D3D") : Color.systemBackground), alignment: .bottom)
         .dynamicTypeSize(.small ... .accessibility1)
-    }
-
-    func menuItems(for item: Models.LibraryItem) -> some View {
-      libraryItemMenu(dataService: dataService, viewModel: viewModel, item: item)
     }
 
     var featureCard: some View {
@@ -714,15 +710,6 @@ struct AnimatingCellHeight: AnimatableModifier {
       }
     }
 
-    var redactedItems: some View {
-      ForEach(Array(fakeLibraryItems(dataService: dataService).enumerated()), id: \.1.id) { _, item in
-        let horizontalInset = CGFloat(UIDevice.isIPad ? 20 : 10)
-        LibraryItemCard(item: item, viewer: dataService.currentViewer)
-          .listRowSeparatorTint(Color.thBorderColor)
-          .listRowInsets(.init(top: 0, leading: horizontalInset, bottom: 10, trailing: horizontalInset))
-      }.redacted(reason: .placeholder)
-    }
-
     var listItems: some View {
       ForEach(Array(viewModel.fetcher.items.enumerated()), id: \.1.unwrappedID) { idx, item in
         let horizontalInset = CGFloat(UIDevice.isIPad ? 20 : 10)
@@ -745,7 +732,7 @@ struct AnimatingCellHeight: AnimatableModifier {
         .listRowSeparatorTint(Color.thBorderColor)
         .listRowInsets(.init(top: 0, leading: horizontalInset, bottom: 10, trailing: horizontalInset))
         .contextMenu {
-          menuItems(for: item)
+          libraryItemMenu(dataService: dataService, viewModel: viewModel, item: item)
         }
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
           if let listConfig = viewModel.currentListConfig {
@@ -813,9 +800,7 @@ struct AnimatingCellHeight: AnimatableModifier {
                     }
                 }
 
-                if viewModel.showLoadingBar == .redacted {
-                  redactedItems
-                } else if viewModel.showLoadingBar == .simple {
+                if viewModel.showLoadingBar == .redacted || viewModel.showLoadingBar == .simple {
                   VStack {
                     ProgressView()
                   }
@@ -842,7 +827,9 @@ struct AnimatingCellHeight: AnimatableModifier {
             }, header: {
               filtersHeader
             })
-            BottomView(viewModel: viewModel)
+            if viewModel.showLoadingBar == .none {
+              BottomView(viewModel: viewModel)
+            }
           }
           .padding(0)
           .listStyle(.plain)
@@ -938,11 +925,20 @@ struct AnimatingCellHeight: AnimatableModifier {
     @EnvironmentObject var dataService: DataService
     @EnvironmentObject var audioController: AudioController
 
-    @State var isContextMenuOpen = false
+    @Binding var listTitle: String
+    @Binding var isListScrolled: Bool
+    @Binding var prefersListLayout: Bool
+    @Binding var isEditMode: EditMode
+    @State private var showHideFeatureAlert = false
 
+    @Binding var selection: Set<String>
     @ObservedObject var viewModel: HomeFeedViewModel
 
-    @Binding var isListScrolled: Bool
+    let showFeatureCards: Bool
+
+    @State var shouldScrollToTop = false
+    @State var topItem: Models.LibraryItem?
+    @ObservedObject var networkMonitor = NetworkMonitor()
 
     func contextMenuActionHandler(item: Models.LibraryItem, action: GridCardAction) {
       switch action {
@@ -972,10 +968,6 @@ struct AnimatingCellHeight: AnimatableModifier {
         .dynamicTypeSize(.small ... .accessibility1)
     }
 
-    func menuItems(for item: Models.LibraryItem) -> some View {
-      libraryItemMenu(dataService: dataService, viewModel: viewModel, item: item)
-    }
-
     var body: some View {
       VStack(alignment: .leading) {
         Color.systemBackground.frame(height: 1)
@@ -995,14 +987,7 @@ struct AnimatingCellHeight: AnimatableModifier {
 
         ScrollView {
           LazyVGrid(columns: [GridItem(.adaptive(minimum: 325, maximum: 400), spacing: 16)], alignment: .center, spacing: 30) {
-            if viewModel.showLoadingBar == .redacted {
-              ForEach(fakeLibraryItems(dataService: dataService), id: \.id) { item in
-                GridCard(item: item)
-                  .aspectRatio(1.0, contentMode: .fill)
-                  .background(Color.systemBackground)
-                  .cornerRadius(6)
-              }.redacted(reason: .placeholder)
-            } else if viewModel.showLoadingBar == .simple {
+            if viewModel.showLoadingBar == .redacted  || viewModel.showLoadingBar == .simple {
               VStack {
                 ProgressView()
               }
@@ -1018,7 +1003,7 @@ struct AnimatingCellHeight: AnimatableModifier {
                     viewModel: viewModel
                   )
                   .contextMenu {
-                    menuItems(for: item)
+                    libraryItemMenu(dataService: dataService, viewModel: viewModel, item: item)
                   }
                   .onAppear {
                     if idx >= viewModel.fetcher.items.count - 5 {
@@ -1050,7 +1035,7 @@ struct AnimatingCellHeight: AnimatableModifier {
             }
           }
 
-          if viewModel.fetcher.items.isEmpty {
+          if viewModel.fetcher.items.isEmpty || viewModel.showLoadingBar == .redacted  || viewModel.showLoadingBar == .simple {
             EmptyState(viewModel: viewModel)
           } else {
             HStack {
@@ -1117,31 +1102,6 @@ struct LinkDestination: View {
       }
     }
   }
-}
-
-func fakeLibraryItems(dataService _: DataService) -> [LibraryItemData] {
-  Array(
-    repeatElement(0, count: 20)
-      .map { _ in
-        LibraryItemData(
-          id: UUID().uuidString,
-          title: "fake title that is kind of long so it looks better",
-          pageURLString: "",
-          isArchived: false,
-          author: "fake author",
-          deepLink: nil,
-          hasLabels: false,
-          noteText: nil,
-          readingProgress: 10,
-          wordsCount: 10,
-          isPDF: false,
-          highlights: nil,
-          sortedLabels: [],
-          imageURL: nil,
-          publisherDisplayName: "fake publisher",
-          descriptionText: "This is a fake description"
-        )
-      })
 }
 
 struct BottomView: View {

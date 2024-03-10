@@ -1,22 +1,17 @@
 import { useCallback, useRef, useState } from 'react'
 import * as Progress from '@radix-ui/react-progress'
 import { File, Info } from 'phosphor-react'
-import toast from 'react-hot-toast'
 import { locale, timeZone } from '../../../lib/dateFormatting'
-import { saveUrlMutation } from '../../../lib/networking/mutations/saveUrlMutation'
 import { showErrorToast, showSuccessToast } from '../../../lib/toastHelpers'
 import { Button } from '../../elements/Button'
 import { FormInput } from '../../elements/FormElements'
 import { Box, HStack, SpanBox, VStack } from '../../elements/LayoutPrimitives'
 import {
-  ModalButtonBar,
   ModalContent,
   ModalOverlay,
   ModalRoot,
-  ModalTitleBar,
 } from '../../elements/ModalPrimitives'
 import { CloseButton } from '../../elements/CloseButton'
-import { StyledText } from '../../elements/StyledText'
 import { styled } from '@stitches/react'
 import Dropzone, {
   Accept,
@@ -62,9 +57,8 @@ export function AddLinkModal(props: AddLinkModalProps): JSX.Element {
           maxHeight: '300',
           fontFamily: '$inter',
         }}
-        onInteractOutside={() => {
-          // remove focus from modal
-          ;(document.activeElement as HTMLElement).blur()
+        onInteractOutside={(event) => {
+          event.preventDefault()
         }}
       >
         <VStack distribution="start" css={{ gap: '20px' }}>
@@ -76,8 +70,8 @@ export function AddLinkModal(props: AddLinkModalProps): JSX.Element {
           <Box css={{ width: '100%' }}>
             {selectedTab == 'link' && <AddLinkTab {...props} />}
             {selectedTab == 'feed' && <AddFeedTab {...props} />}
-            {selectedTab == 'opml' && <UploadOPMLTab {...props} />}
-            {selectedTab == 'pdf' && <UploadPDFTab {...props} />}
+            {selectedTab == 'opml' && <UploadOPMLTab />}
+            {selectedTab == 'pdf' && <UploadPDFTab />}
             {selectedTab == 'import' && <UploadImportTab {...props} />}
           </Box>
         </VStack>
@@ -96,7 +90,7 @@ const AddLinkTab = (props: AddLinkModalProps): JSX.Element => {
       await props.handleLinkSubmission(link, timeZone, locale)
       props.onOpenChange(false)
     },
-    [errorMessage, setErrorMessage]
+    [props, errorMessage, setErrorMessage]
   )
 
   return (
@@ -144,8 +138,9 @@ const AddFeedTab = (props: AddLinkModalProps): JSX.Element => {
       }
 
       showSuccessToast('New feed has been added.')
+      props.onOpenChange(false)
     },
-    [errorMessage, setErrorMessage]
+    [props, errorMessage, setErrorMessage]
   )
 
   return (
@@ -167,22 +162,18 @@ type AddFromURLProps = {
 
 const AddFromURL = (props: AddFromURLProps): JSX.Element => {
   const [url, setURL] = useState('')
-  const [errorMessage, setErrorMessage] = useState(props.errorMessage)
 
-  const validateURL = useCallback(
-    (link: string) => {
-      try {
-        const url = new URL(link)
-        if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-          return false
-        }
-      } catch (e) {
+  const validateURL = useCallback((link: string) => {
+    try {
+      const url = new URL(link)
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') {
         return false
       }
-      return true
-    },
-    [url]
-  )
+    } catch (e) {
+      return false
+    }
+    return true
+  }, [])
 
   return (
     <VStack css={{ width: '100%', height: '180px' }}>
@@ -198,7 +189,7 @@ const AddFromURL = (props: AddFromURLProps): JSX.Element => {
           event.preventDefault()
 
           if (!validateURL(url)) {
-            setErrorMessage('Invalid URL')
+            props.setErrorMessage('Invalid URL')
             return
           }
 
@@ -222,6 +213,32 @@ const AddFromURL = (props: AddFromURLProps): JSX.Element => {
             bg: '$thFormInput',
           }}
         />
+        {props.errorMessage && (
+          <HStack
+            distribution="start"
+            alignment="start"
+            css={{
+              width: '100%',
+              bg: '#FF000010',
+              p: '5px',
+              pl: '10px',
+              fontSize: '12px',
+              fontFamily: '$inter',
+              textAlign: 'center',
+              color: '$ctaBlue',
+              borderRadius: '5px',
+            }}
+          >
+            <HStack
+              distribution="start"
+              alignment="center"
+              css={{ gap: '5px', whiteSpace: 'pre-line', color: 'red' }}
+            >
+              <Info size={14} color="red" />
+              {props.errorMessage}
+            </HStack>
+          </HStack>
+        )}
         <Button
           style="ctaBlue"
           type="submit"
@@ -234,7 +251,7 @@ const AddFromURL = (props: AddFromURLProps): JSX.Element => {
   )
 }
 
-const UploadOPMLTab = (props: AddLinkModalProps): JSX.Element => {
+const UploadOPMLTab = (): JSX.Element => {
   return (
     <VStack
       alignment="start"
@@ -254,7 +271,7 @@ const UploadOPMLTab = (props: AddLinkModalProps): JSX.Element => {
   )
 }
 
-const UploadPDFTab = (props: AddLinkModalProps): JSX.Element => {
+const UploadPDFTab = (): JSX.Element => {
   return (
     <VStack
       alignment="start"
@@ -640,20 +657,22 @@ const UploadPad = (props: UploadPadProps): JSX.Element => {
                       </>
                     ) : (
                       <>
-                        <Box
-                          css={{
-                            fontSize: '12px',
-                            fontFamily: '$inter',
-                            textAlign: 'center',
-                            color: '$tabTextUnselected',
-                          }}
-                        >
-                          {props.description}
-                          <br /> or{' '}
-                          <a href="" onClick={openDialog}>
-                            choose your files
-                          </a>
-                        </Box>
+                        {(!uploadFiles || uploadFiles.length == 0) && (
+                          <Box
+                            css={{
+                              fontSize: '12px',
+                              fontFamily: '$inter',
+                              textAlign: 'center',
+                              color: '$tabTextUnselected',
+                            }}
+                          >
+                            {props.description}
+                            <br /> or{' '}
+                            <a href="" onClick={openDialog}>
+                              choose your files
+                            </a>
+                          </Box>
+                        )}
                       </>
                     )}
                   </VStack>

@@ -1,56 +1,126 @@
 /* eslint-disable functional/no-class */
 /* eslint-disable functional/no-this-expression */
 import { IconProps } from './IconProps'
-import { SpanBox } from '../LayoutPrimitives'
 
 import React from 'react'
+import { MultiSelectMode } from '../../templates/homeFeed/LibraryHeader'
 
-export class HeaderCheckboxIcon extends React.Component<IconProps> {
+type HeaderCheckboxIconProps = {
+  multiSelectMode: MultiSelectMode
+}
+
+export const HeaderCheckboxIcon = (
+  props: HeaderCheckboxIconProps
+): JSX.Element => {
+  switch (props.multiSelectMode) {
+    case 'search':
+    case 'visible':
+      return <HeaderCheckboxCheckedIcon size={17} />
+    case 'none':
+    case 'off':
+      return <HeaderCheckboxUncheckedIcon size={17} />
+    case 'some':
+      return <HeaderCheckboxHalfCheckedIcon size={17} />
+  }
+}
+
+export class HeaderCheckboxUncheckedIcon extends React.Component<IconProps> {
   render() {
+    const size = (this.props.size || 26).toString()
     return (
-      <SpanBox
-        css={{
-          display: 'flex',
-          '--inner-color': 'var(--colors-thHeaderIconInner)',
-          '--ring-color': 'var(--colors-thHeaderIconRing)',
-          '&:hover': {
-            '--inner-color': 'white',
-            '--ring-fill': '#007AFF',
-            '--ring-color': '#007AFF',
-          },
-        }}
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 21 20"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
       >
-        <svg
-          width="40"
-          height="40"
-          viewBox="0 0 40 40"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <rect
-            x="0.5"
-            y="0.5"
-            width="39"
-            height="39"
-            rx="19.5"
+        <g>
+          <path
+            d="M3.479 4.16667C3.479 3.72464 3.6546 3.30072 3.96716 2.98816C4.27972 2.67559 4.70364 2.5 5.14567 2.5H16.8123C17.2544 2.5 17.6783 2.67559 17.9908 2.98816C18.3034 3.30072 18.479 3.72464 18.479 4.16667V15.8333C18.479 16.2754 18.3034 16.6993 17.9908 17.0118C17.6783 17.3244 17.2544 17.5 16.8123 17.5H5.14567C4.70364 17.5 4.27972 17.3244 3.96716 17.0118C3.6546 16.6993 3.479 16.2754 3.479 15.8333V4.16667Z"
+            strokeWidth="1.25"
+            strokeLinecap="round"
+            strokeLinejoin="round"
             style={{
-              fill: 'var(--ring-fill)',
-              stroke: 'var(--ring-color)',
+              stroke: 'var(--checkbox-color)',
             }}
+          />
+        </g>
+      </svg>
+    )
+  }
+}
+
+export class HeaderCheckboxCheckedIcon extends React.Component<IconProps> {
+  render() {
+    const size = (this.props.size || 26).toString()
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 21 20"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <g>
+          <path
+            d="M3.479 4.16667C3.479 3.72464 3.6546 3.30072 3.96716 2.98816C4.27972 2.67559 4.70364 2.5 5.14567 2.5H16.8123C17.2544 2.5 17.6783 2.67559 17.9908 2.98816C18.3034 3.30072 18.479 3.72464 18.479 4.16667V15.8333C18.479 16.2754 18.3034 16.6993 17.9908 17.0118C17.6783 17.3244 17.2544 17.5 16.8123 17.5H5.14567C4.70364 17.5 4.27972 17.3244 3.96716 17.0118C3.6546 16.6993 3.479 16.2754 3.479 15.8333V4.16667Z"
+            style={{
+              stroke: 'var(--checkbox-color)',
+            }}
+            strokeWidth="1.25"
+            strokeLinecap="round"
+            strokeLinejoin="round"
           />
           <g>
             <path
-              d="M12.5 14.1667C12.5 13.7246 12.6756 13.3007 12.9882 12.9882C13.3007 12.6756 13.7246 12.5 14.1667 12.5H25.8333C26.2754 12.5 26.6993 12.6756 27.0118 12.9882C27.3244 13.3007 27.5 13.7246 27.5 14.1667V25.8333C27.5 26.2754 27.3244 26.6993 27.0118 27.0118C26.6993 27.3244 26.2754 27.5 25.8333 27.5H14.1667C13.7246 27.5 13.3007 27.3244 12.9882 27.0118C12.6756 26.6993 12.5 26.2754 12.5 25.8333V14.1667Z"
+              d="M7.73877 10.0004L10.0536 12.3152L14.6832 7.68555"
               style={{
-                stroke: 'var(--inner-color)',
+                stroke: 'var(--checkbox-color)',
               }}
-              strokeWidth="1.25"
+              strokeWidth="1.5"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
           </g>
-        </svg>
-      </SpanBox>
+        </g>
+      </svg>
+    )
+  }
+}
+
+export class HeaderCheckboxHalfCheckedIcon extends React.Component<IconProps> {
+  render() {
+    const size = (this.props.size || 26).toString()
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 21 20"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <g>
+          <path
+            d="M3.479 4.16667C3.479 3.72464 3.6546 3.30072 3.96716 2.98816C4.27972 2.67559 4.70364 2.5 5.14567 2.5H16.8123C17.2544 2.5 17.6783 2.67559 17.9908 2.98816C18.3034 3.30072 18.479 3.72464 18.479 4.16667V15.8333C18.479 16.2754 18.3034 16.6993 17.9908 17.0118C17.6783 17.3244 17.2544 17.5 16.8123 17.5H5.14567C4.70364 17.5 4.27972 17.3244 3.96716 17.0118C3.6546 16.6993 3.479 16.2754 3.479 15.8333V4.16667Z"
+            style={{
+              stroke: 'var(--checkbox-color)',
+            }}
+            strokeWidth="1.25"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M6.979 10L14.979 10"
+            style={{
+              stroke: 'var(--checkbox-color)',
+            }}
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </g>
+      </svg>
     )
   }
 }

@@ -5,6 +5,7 @@ import { addLabelsToLibraryItem } from '../services/labels'
 import {
   SearchArgs,
   searchLibraryItems,
+  softDeleteLibraryItem,
   updateLibraryItem,
 } from '../services/library_item'
 import { findEnabledRules } from '../services/rules'
@@ -38,6 +39,10 @@ const addLabels = async (obj: RuleActionObj) => {
   )
 }
 
+const deleteLibraryItem = async (obj: RuleActionObj) => {
+  return softDeleteLibraryItem(obj.libraryItem.id, obj.userId)
+}
+
 const archivePage = async (obj: RuleActionObj) => {
   return updateLibraryItem(
     obj.libraryItem.id,
@@ -65,9 +70,14 @@ const sendNotification = async (obj: RuleActionObj) => {
   const message = {
     title: item.author || item.siteName || 'Omnivore',
     body: item.title,
+    image: item.thumbnail,
+  }
+  const data = {
+    folder: item.folder,
+    libraryItemId: item.id,
   }
 
-  return sendPushNotifications(obj.userId, message, 'rule')
+  return sendPushNotifications(obj.userId, message, 'rule', data)
 }
 
 const getRuleAction = (actionType: RuleActionType): RuleActionFunc => {
@@ -76,6 +86,8 @@ const getRuleAction = (actionType: RuleActionType): RuleActionFunc => {
       return addLabels
     case RuleActionType.Archive:
       return archivePage
+    case RuleActionType.Delete:
+      return deleteLibraryItem
     case RuleActionType.MarkAsRead:
       return markPageAsRead
     case RuleActionType.SendNotification:
@@ -123,7 +135,7 @@ const triggerActions = async (
   try {
     await Promise.all(actionPromises)
   } catch (error) {
-    logger.error(error)
+    logger.error('Error triggering rule actions', error)
   }
 }
 

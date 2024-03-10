@@ -9,6 +9,7 @@ import { DeepPartial } from 'typeorm'
 import { v4 as uuid } from 'uuid'
 import { ImportItemState } from '../entity/integration'
 import { Recommendation } from '../entity/recommendation'
+import { FetchContentType } from '../entity/subscription'
 import { env } from '../env'
 import {
   ArticleSavingRequestStatus,
@@ -17,7 +18,17 @@ import {
 import { BulkActionData, BULK_ACTION_JOB_NAME } from '../jobs/bulk_action'
 import { CallWebhookJobData, CALL_WEBHOOK_JOB_NAME } from '../jobs/call_webhook'
 import { THUMBNAIL_JOB } from '../jobs/find_thumbnail'
-import { queueRSSRefreshFeedJob } from '../jobs/rss/refreshAllFeeds'
+import { EXPORT_ALL_ITEMS_JOB_NAME } from '../jobs/integration/export_all_items'
+import {
+  ExportItemJobData,
+  EXPORT_ITEM_JOB_NAME,
+} from '../jobs/integration/export_item'
+import {
+  queueRSSRefreshFeedJob,
+  REFRESH_ALL_FEEDS_JOB_NAME,
+  REFRESH_FEED_JOB_NAME,
+} from '../jobs/rss/refreshAllFeeds'
+import { SYNC_READ_POSITIONS_JOB_NAME } from '../jobs/sync_read_positions'
 import { TriggerRuleJobData, TRIGGER_RULE_JOB_NAME } from '../jobs/trigger_rule'
 import {
   UpdateHighlightData,
@@ -33,9 +44,45 @@ import { CreateTaskError } from './errors'
 import { stringToHash } from './helpers'
 import { logger } from './logger'
 import View = google.cloud.tasks.v2.Task.View
+import { AISummarizeJobData, AI_SUMMARIZE_JOB_NAME } from '../jobs/ai-summarize'
 
 // Instantiates a client.
 const client = new CloudTasksClient()
+
+/**
+ * we want to prioritized jobs by the expected time to complete
+ * lower number means higher priority
+ * priority 1: jobs that are expected to run immediately
+ * priority 5: jobs that are expected to run in less than 10 seconds
+ * priority 10: jobs that are expected to run in less than 1 minute
+ * priority 50: jobs that are expected to run in less than 30 minutes
+ * priority 100: jobs that are expected to run in less than 1 hour
+ **/
+export const getJobPriority = (jobName: string): number => {
+  switch (jobName) {
+    case UPDATE_LABELS_JOB:
+    case UPDATE_HIGHLIGHT_JOB:
+    case SYNC_READ_POSITIONS_JOB_NAME:
+      return 1
+    case TRIGGER_RULE_JOB_NAME:
+    case CALL_WEBHOOK_JOB_NAME:
+    case AI_SUMMARIZE_JOB_NAME:
+      return 5
+    case BULK_ACTION_JOB_NAME:
+    case `${REFRESH_FEED_JOB_NAME}_high`:
+      return 10
+    case `${REFRESH_FEED_JOB_NAME}_low`:
+    case EXPORT_ITEM_JOB_NAME:
+      return 50
+    case EXPORT_ALL_ITEMS_JOB_NAME:
+    case REFRESH_ALL_FEEDS_JOB_NAME:
+    case THUMBNAIL_JOB:
+      return 100
+    default:
+      logger.error(`unknown job name: ${jobName}`)
+      return 1
+  }
+}
 
 const logError = (error: any): void => {
   if (axios.isAxiosError(error)) {
@@ -283,6 +330,7 @@ export const enqueueParseRequest = async ({
     publishedAt,
     folder,
     rssFeedUrl,
+    priority,
   }
 
   // If there is no Google Cloud Project Id exposed, it means that we are in local environment
@@ -536,55 +584,22 @@ export const enqueueImportFromIntegration = async (
   return createdTasks[0].name
 }
 
-export const enqueueExportToIntegration = async (
+export const enqueueExportAllItems = async (
   integrationId: string,
-  integrationName: string,
-  syncAt: number, // unix timestamp in milliseconds
-  authToken: string
-): Promise<string> => {
-  const { GOOGLE_CLOUD_PROJECT } = process.env
+  userId: string
+) => {
+  const queue = await getBackendQueue()
+  if (!queue) {
+    return undefined
+  }
   const payload = {
+    userId,
     integrationId,
-    integrationName,
-    syncAt,
   }
-
-  const headers = {
-    [OmnivoreAuthorizationHeader]: authToken,
-  }
-  // If there is no Google Cloud Project Id exposed, it means that we are in local environment
-  if (env.dev.isLocal || !GOOGLE_CLOUD_PROJECT) {
-    if (env.queue.integrationExporterUrl) {
-      // Calling the handler function directly.
-      setTimeout(() => {
-        axios
-          .post(env.queue.integrationExporterUrl, payload, {
-            headers,
-          })
-          .catch((error) => {
-            logError(error)
-          })
-      }, 0)
-    }
-    return nanoid()
-  }
-
-  const createdTasks = await createHttpTaskWithToken({
-    project: GOOGLE_CLOUD_PROJECT,
-    payload,
-    taskHandlerUrl: env.queue.integrationExporterUrl,
-    priority: 'low',
-    requestHeaders: headers,
+  return queue.add(EXPORT_ALL_ITEMS_JOB_NAME, payload, {
+    priority: getJobPriority(EXPORT_ALL_ITEMS_JOB_NAME),
+    attempts: 1,
   })
-
-  if (!createdTasks || !createdTasks[0].name) {
-    logger.error(`Unable to get the name of the task`, {
-      payload,
-      createdTasks,
-    })
-    throw new CreateTaskError(`Unable to get the name of the task`)
-  }
-  return createdTasks[0].name
 }
 
 export const enqueueThumbnailJob = async (
@@ -600,7 +615,7 @@ export const enqueueThumbnailJob = async (
     libraryItemId,
   }
   return queue.add(THUMBNAIL_JOB, payload, {
-    priority: 100,
+    priority: getJobPriority(THUMBNAIL_JOB),
     attempts: 1,
     removeOnComplete: true,
   })
@@ -613,7 +628,7 @@ export interface RssSubscriptionGroup {
   mostRecentItemDates: (Date | null)[]
   scheduledDates: Date[]
   checksums: (string | null)[]
-  fetchContents: boolean[]
+  fetchContentTypes: FetchContentType[]
   folders: string[]
 }
 
@@ -636,7 +651,7 @@ export const enqueueRssFeedFetch = async (
       timestamp.getTime()
     ), // unix timestamp in milliseconds
     userIds: subscriptionGroup.userIds,
-    fetchContents: subscriptionGroup.fetchContents,
+    fetchContentTypes: subscriptionGroup.fetchContentTypes,
     folders: subscriptionGroup.folders,
   }
 
@@ -664,7 +679,7 @@ export const enqueueTriggerRuleJob = async (data: TriggerRuleJobData) => {
   }
 
   return queue.add(TRIGGER_RULE_JOB_NAME, data, {
-    priority: 5,
+    priority: getJobPriority(TRIGGER_RULE_JOB_NAME),
     attempts: 1,
   })
 }
@@ -676,8 +691,20 @@ export const enqueueWebhookJob = async (data: CallWebhookJobData) => {
   }
 
   return queue.add(CALL_WEBHOOK_JOB_NAME, data, {
-    priority: 5,
+    priority: getJobPriority(CALL_WEBHOOK_JOB_NAME),
     attempts: 1,
+  })
+}
+
+export const enqueueAISummarizeJob = async (data: AISummarizeJobData) => {
+  const queue = await getBackendQueue()
+  if (!queue) {
+    return undefined
+  }
+
+  return queue.add(AI_SUMMARIZE_JOB_NAME, data, {
+    priority: getJobPriority(AI_SUMMARIZE_JOB_NAME),
+    attempts: 3,
   })
 }
 
@@ -693,7 +720,7 @@ export const bulkEnqueueUpdateLabels = async (data: UpdateLabelsData[]) => {
     opts: {
       jobId: `${UPDATE_LABELS_JOB}_${d.libraryItemId}_${JOB_VERSION}`,
       attempts: 6,
-      priority: 1,
+      priority: getJobPriority(UPDATE_LABELS_JOB),
       removeOnComplete: true,
       removeOnFail: true,
     },
@@ -717,7 +744,7 @@ export const enqueueUpdateHighlight = async (data: UpdateHighlightData) => {
     return queue.add(UPDATE_HIGHLIGHT_JOB, data, {
       jobId: `${UPDATE_HIGHLIGHT_JOB}_${data.libraryItemId}_${JOB_VERSION}`,
       attempts: 6,
-      priority: 1,
+      priority: getJobPriority(UPDATE_HIGHLIGHT_JOB),
       removeOnComplete: true,
       removeOnFail: true,
     })
@@ -737,7 +764,7 @@ export const enqueueBulkAction = async (data: BulkActionData) => {
   try {
     return queue.add(BULK_ACTION_JOB_NAME, data, {
       attempts: 1,
-      priority: 10,
+      priority: getJobPriority(BULK_ACTION_JOB_NAME),
       jobId, // deduplication
       removeOnComplete: true,
       removeOnFail: true,
@@ -745,6 +772,22 @@ export const enqueueBulkAction = async (data: BulkActionData) => {
   } catch (error) {
     logger.error('error enqueuing bulk action job', error)
   }
+}
+
+export const enqueueExportItem = async (jobData: ExportItemJobData) => {
+  const queue = await getBackendQueue()
+  if (!queue) {
+    return undefined
+  }
+
+  return queue.add(EXPORT_ITEM_JOB_NAME, jobData, {
+    attempts: 3,
+    priority: getJobPriority(EXPORT_ITEM_JOB_NAME),
+    backoff: {
+      type: 'exponential',
+      delay: 10000, // 10 seconds
+    },
+  })
 }
 
 export default createHttpTaskWithToken

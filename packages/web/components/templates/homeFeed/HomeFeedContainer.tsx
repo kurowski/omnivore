@@ -2,7 +2,7 @@ import { Action, createAction, useKBar, useRegisterActions } from 'kbar'
 import debounce from 'lodash/debounce'
 import { useRouter } from 'next/router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import toast, { Toaster } from 'react-hot-toast'
+import { Toaster } from 'react-hot-toast'
 import TopBarProgress from 'react-topbar-progress-indicator'
 import { useFetchMore } from '../../../lib/hooks/useFetchMoreScroll'
 import { usePersistedState } from '../../../lib/hooks/usePersistedState'
@@ -36,32 +36,28 @@ import { AddLinkModal } from './AddLinkModal'
 import { EditLibraryItemModal } from './EditItemModals'
 import { EmptyLibrary } from './EmptyLibrary'
 import { HighlightItemsLayout } from './HighlightsLayout'
-import { LibraryFilterMenu } from './LibraryFilterMenu'
-import {
-  LibraryHeader,
-  MultiSelectMode,
-  headerControlWidths,
-} from './LibraryHeader'
+import { LibraryFilterMenu } from '../navMenu/LibraryMenu'
+import { LibraryLegacyMenu } from '../navMenu/LibraryLegacyMenu'
+import { LibraryHeader, MultiSelectMode } from './LibraryHeader'
 import { UploadModal } from '../UploadModal'
 import { BulkAction } from '../../../lib/networking/mutations/bulkActionMutation'
 import { bulkActionMutation } from '../../../lib/networking/mutations/bulkActionMutation'
 import {
   showErrorToast,
   showSuccessToast,
-  showSuccessToastWithUndo,
+  showSuccessToastWithAction,
 } from '../../../lib/toastHelpers'
 import { SetPageLabelsModalPresenter } from '../article/SetLabelsModalPresenter'
 import { NotebookPresenter } from '../article/NotebookPresenter'
 import { saveUrlMutation } from '../../../lib/networking/mutations/saveUrlMutation'
 import { articleQuery } from '../../../lib/networking/queries/useGetArticleQuery'
-import { searchQuery } from '../../../lib/networking/queries/search'
-import { MoreOptionsIcon } from '../../elements/images/MoreOptionsIcon'
-import { theme } from '../../tokens/stitches.config'
-import { PinnedSearch } from '../../../pages/settings/pinned-searches'
 import { PinnedButtons } from './PinnedButtons'
+import { PinnedSearch } from '../../../pages/settings/pinned-searches'
+import { FetchItemsError } from './FetchItemsError'
+import { TLDRLayout } from './TLDRLayout'
 
 export type LayoutType = 'LIST_LAYOUT' | 'GRID_LAYOUT'
-export type LibraryMode = 'reads' | 'highlights'
+export type LibraryMode = 'reads' | 'highlights' | 'tldr'
 
 const fetchSearchResults = async (query: string, cb: any) => {
   if (!query.startsWith('#')) return
@@ -79,7 +75,7 @@ const debouncedFetchSearchResults = debounce((query, cb) => {
 // We set a relatively high delay for the refresh at the end, as it's likely there's an issue
 // in processing. We give it the best attempt to be able to resolve, but if it doesn't we set
 // the state as Failed. On refresh it will try again if the backend sends "PROCESSING"
-const TIMEOUT_DELAYS = [1000, 2000, 2500, 3500, 5000, 10000, 60000]
+const TIMEOUT_DELAYS = [2000, 3500, 5000]
 
 export function HomeFeedContainer(): JSX.Element {
   const { viewerData } = useGetViewerQuery()
@@ -119,6 +115,7 @@ export function HomeFeedContainer(): JSX.Element {
     isValidating,
     performActionOnItem,
     mutate,
+    error: fetchItemsError,
   } = useGetLibraryItemsQuery(queryInputs)
 
   useEffect(() => {
@@ -146,11 +143,17 @@ export function HomeFeedContainer(): JSX.Element {
   }, [queryValue])
 
   useEffect(() => {
+    console.log('ueryInputs.searchQuery', queryInputs.searchQuery)
     if (
       queryInputs.searchQuery &&
       queryInputs.searchQuery?.indexOf('mode:highlights') > -1
     ) {
       setMode('highlights')
+    } else if (
+      queryInputs.searchQuery &&
+      queryInputs.searchQuery?.indexOf('mode:tldr') > -1
+    ) {
+      setMode('tldr')
     } else {
       setMode('reads')
     }
@@ -219,8 +222,12 @@ export function HomeFeedContainer(): JSX.Element {
       let startIdx = 0
 
       const seeIfUpdated = async () => {
-        if (startIdx > TIMEOUT_DELAYS.length) {
+        if (startIdx >= TIMEOUT_DELAYS.length) {
           item.node.state = State.FAILED
+          const updatedArticle = { ...item }
+          updatedArticle.node = { ...item.node }
+          updatedArticle.isLoading = false
+          performActionOnItem('update-item', updatedArticle)
           return
         }
 
@@ -628,7 +635,7 @@ export function HomeFeedContainer(): JSX.Element {
     createAction({
       section: 'Library',
       name: 'Mark item as read',
-      shortcut: ['m', 'r'],
+      shortcut: ['-'],
       perform: () => {
         handleCardAction('mark-read', activeItem)
       },
@@ -636,7 +643,7 @@ export function HomeFeedContainer(): JSX.Element {
     createAction({
       section: 'Library',
       name: 'Mark item as unread',
-      shortcut: ['m', 'u'],
+      shortcut: ['_'],
       perform: () => handleCardAction('mark-unread', activeItem),
     }),
   ]
@@ -792,26 +799,10 @@ export function HomeFeedContainer(): JSX.Element {
   ) => {
     const result = await saveUrlMutation(link, timezone, locale)
     if (result) {
-      toast(
-        () => (
-          <Box>
-            Link Saved
-            <span style={{ padding: '16px' }} />
-            <Button
-              style="ctaDarkYellow"
-              autoFocus
-              onClick={() => {
-                window.location.href = `/article?url=${encodeURIComponent(
-                  link
-                )}`
-              }}
-            >
-              Read Now
-            </Button>
-          </Box>
-        ),
-        { position: 'bottom-right' }
-      )
+      showSuccessToastWithAction('Link saved', 'Read now', async () => {
+        window.location.href = `/article?url=${encodeURIComponent(link)}`
+        return Promise.resolve()
+      })
       const id = result.url?.match(/[^/]+$/)?.[0] ?? ''
       performActionOnItem('refresh', undefined as unknown as any)
     } else {
@@ -861,6 +852,7 @@ export function HomeFeedContainer(): JSX.Element {
       hasData={!!itemsPages}
       totalItems={itemsPages?.[0].search.pageInfo.totalCount || 0}
       isValidating={isValidating}
+      fetchItemsError={!!fetchItemsError}
       labelsTarget={labelsTarget}
       setLabelsTarget={setLabelsTarget}
       notebookTarget={notebookTarget}
@@ -895,6 +887,8 @@ export type HomeFeedContentProps = {
   hasData: boolean
   totalItems: number
   isValidating: boolean
+  fetchItemsError: boolean
+
   loadMore: () => void
   labelsTarget: LibraryItem | undefined
   setLabelsTarget: (target: LibraryItem | undefined) => void
@@ -944,6 +938,10 @@ function HomeFeedGrid(props: HomeFeedContentProps): JSX.Element {
     key: 'libraryLayout',
     initialValue: 'LIST_LAYOUT',
   })
+  const [navMenuStyle] = usePersistedState<'legacy' | 'shortcuts'>({
+    key: 'library-nav-menu-style',
+    initialValue: 'legacy',
+  })
 
   const updateLayout = useCallback(
     async (newLayout: LayoutType) => {
@@ -955,21 +953,34 @@ function HomeFeedGrid(props: HomeFeedContentProps): JSX.Element {
 
   const [showFilterMenu, setShowFilterMenu] = useState(false)
 
+  const showItems = useMemo(() => {
+    if (props.fetchItemsError) {
+      return false
+    }
+    if (!props.isValidating && props.items.length <= 0) {
+      return false
+    }
+    return true
+  }, [props])
+
   return (
     <VStack
       css={{
         height: '100%',
-        width: props.mode == 'highlights' ? '100%' : 'unset',
+        width: !showItems || props.mode == 'highlights' ? '100%' : 'unset',
       }}
     >
       {props.mode != 'highlights' && (
         <LibraryHeader
           layout={layout}
+          viewer={viewerData?.me}
           updateLayout={updateLayout}
           searchTerm={props.searchTerm}
           applySearchQuery={(searchQuery: string) => {
             props.applySearchQuery(searchQuery)
           }}
+          mode={props.mode}
+          setMode={props.setMode}
           showFilterMenu={showFilterMenu}
           setShowFilterMenu={setShowFilterMenu}
           multiSelectMode={props.multiSelectMode}
@@ -980,31 +991,60 @@ function HomeFeedGrid(props: HomeFeedContentProps): JSX.Element {
       )}
 
       <HStack css={{ width: '100%', height: '100%' }}>
-        <LibraryFilterMenu
-          setShowAddLinkModal={props.setShowAddLinkModal}
-          searchTerm={props.searchTerm}
-          applySearchQuery={(searchQuery: string) => {
-            props.applySearchQuery(searchQuery)
-          }}
-          showFilterMenu={showFilterMenu}
-          setShowFilterMenu={setShowFilterMenu}
-        />
+        {navMenuStyle == 'shortcuts' && (
+          <LibraryFilterMenu
+            setShowAddLinkModal={props.setShowAddLinkModal}
+            searchTerm={props.searchTerm}
+            applySearchQuery={(searchQuery: string) => {
+              props.applySearchQuery(searchQuery)
+            }}
+            showFilterMenu={showFilterMenu}
+            setShowFilterMenu={setShowFilterMenu}
+          />
+        )}
+        {navMenuStyle == 'legacy' && (
+          <LibraryLegacyMenu
+            setShowAddLinkModal={props.setShowAddLinkModal}
+            searchTerm={props.searchTerm}
+            applySearchQuery={(searchQuery: string) => {
+              props.applySearchQuery(searchQuery)
+            }}
+            showFilterMenu={showFilterMenu}
+            setShowFilterMenu={setShowFilterMenu}
+          />
+        )}
 
-        {!props.isValidating && props.mode == 'highlights' && (
+        {!showItems && props.fetchItemsError && <FetchItemsError />}
+        {!showItems && !props.fetchItemsError && props.items.length <= 0 && (
+          <EmptyLibrary
+            searchTerm={props.searchTerm}
+            onAddLinkClicked={() => {
+              props.setShowAddLinkModal(true)
+            }}
+          />
+        )}
+
+        {showItems && props.mode == 'highlights' && (
           <HighlightItemsLayout
             gridContainerRef={props.gridContainerRef}
             items={props.items}
             viewer={viewerData?.me}
+            showFilterMenu={showFilterMenu}
+            setShowFilterMenu={setShowFilterMenu}
           />
         )}
 
-        {props.mode == 'reads' && (
+        {showItems && props.mode == 'reads' && (
           <LibraryItemsLayout
             viewer={viewerData?.me}
             layout={layout}
             isChecked={props.itemIsChecked}
             {...props}
           />
+        )}
+
+        {showItems && props.mode == 'tldr' && (
+          <TLDRLayout viewer={viewerData?.me} layout={layout} {...props} />
         )}
 
         {props.showAddLinkModal && (
@@ -1100,30 +1140,20 @@ export function LibraryItemsLayout(
           }}
           style={{ height: '100%', width: '100%' }}
         >
-          {!props.isValidating && props.items.length == 0 ? (
-            <EmptyLibrary
-              layoutType={props.layout}
-              searchTerm={props.searchTerm}
-              onAddLinkClicked={() => {
-                props.setShowAddLinkModal(true)
-              }}
-            />
-          ) : (
-            <LibraryItems
-              items={props.items}
-              layout={props.layout}
-              viewer={props.viewer}
-              isChecked={props.isChecked}
-              setIsChecked={props.setIsChecked}
-              gridContainerRef={props.gridContainerRef}
-              setShowEditTitleModal={props.setShowEditTitleModal}
-              setLinkToEdit={props.setLinkToEdit}
-              setShowUnsubscribeConfirmation={setShowUnsubscribeConfirmation}
-              setLinkToUnsubscribe={props.setLinkToUnsubscribe}
-              actionHandler={props.actionHandler}
-              multiSelectMode={props.multiSelectMode}
-            />
-          )}
+          <LibraryItems
+            items={props.items}
+            layout={props.layout}
+            viewer={props.viewer}
+            isChecked={props.isChecked}
+            setIsChecked={props.setIsChecked}
+            gridContainerRef={props.gridContainerRef}
+            setShowEditTitleModal={props.setShowEditTitleModal}
+            setLinkToEdit={props.setLinkToEdit}
+            setShowUnsubscribeConfirmation={setShowUnsubscribeConfirmation}
+            setLinkToUnsubscribe={props.setLinkToUnsubscribe}
+            actionHandler={props.actionHandler}
+            multiSelectMode={props.multiSelectMode}
+          />
           <HStack
             distribution="center"
             css={{ width: '100%', mt: '$2', mb: '$4' }}
@@ -1150,7 +1180,10 @@ export function LibraryItemsLayout(
           updateItem={(item: LibraryItem) =>
             props.actionHandler('update-item', item)
           }
-          onOpenChange={() => props.setShowEditTitleModal(false)}
+          onOpenChange={() => {
+            props.setShowEditTitleModal(false)
+            props.setLinkToEdit(undefined)
+          }}
           item={props.linkToEdit as LibraryItem}
         />
       )}
@@ -1232,7 +1265,7 @@ function LibraryItems(props: LibraryItemsProps): JSX.Element {
         marginBottom: '0px',
         paddingTop: '0',
         paddingBottom: '0px',
-        overflow: 'hidden',
+        overflow: 'visible',
         '@media (max-width: 930px)': {
           gridGap: props.layout == 'LIST_LAYOUT' ? '0px' : '20px',
         },
@@ -1312,6 +1345,7 @@ function LibraryItems(props: LibraryItemsProps): JSX.Element {
                 } else {
                   props.actionHandler(action, linkedItem)
                 }
+                document.body.style.removeProperty('pointer-events')
               }}
             />
           )}
