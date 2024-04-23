@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useRef } from 'react'
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { StyledText } from '../../elements/StyledText'
 import { Box, HStack, SpanBox, VStack } from '../../elements/LayoutPrimitives'
 import { Button } from '../../elements/Button'
@@ -30,6 +30,8 @@ import { OutlinedLabelChip } from '../../elements/OutlinedLabelChip'
 import { NewsletterIcon } from '../../elements/icons/NewsletterIcon'
 import { Dropdown, DropdownOption } from '../../elements/DropdownElements'
 import { useRouter } from 'next/router'
+import { DiscoverIcon } from "../../elements/icons/DiscoverIcon"
+import { escapeQuotes } from "../../../utils/helper"
 
 export const LIBRARY_LEFT_MENU_WIDTH = '275px'
 
@@ -216,6 +218,12 @@ const LibraryNav = (props: LibraryFilterMenuProps): JSX.Element => {
         text="Highlights"
         filterTerm="in:all has:highlights mode:highlights"
         icon={<HighlightsIcon color={theme.colors.highlight.toString()} />}
+      />
+      <NavRedirectButton
+        {...props}
+        text="Discover"
+        redirectLocation={'/discover'}
+        icon={<DiscoverIcon color={theme.colors.discover.toString()} />}
       />
     </VStack>
   )
@@ -538,7 +546,7 @@ function Subscriptions(
         name: name,
         keywords: '*' + name,
         perform: () => {
-          props.applySearchQuery(`subscription:\"${name}\"`)
+          props.applySearchQuery(`subscription:\"${escapeQuotes(name)}\"`)
         },
       }
     }),
@@ -574,7 +582,9 @@ function Subscriptions(
                 return (
                   <FilterButton
                     key={item.id}
-                    filterTerm={`in:inbox subscription:\"${item.name}\"`}
+                    filterTerm={`in:inbox subscription:\"${escapeQuotes(
+                      item.name
+                    )}\"`}
                     text={item.name}
                     {...props}
                   />
@@ -720,6 +730,70 @@ type NavButtonProps = {
   setShowFilterMenu: (show: boolean) => void
 }
 
+type NavButtonRedirectProps = {
+  text: string
+  icon: ReactNode
+
+  redirectLocation: string
+}
+
+function NavRedirectButton(props: NavButtonRedirectProps): JSX.Element {
+  const [selected, setSelected] = useState(false)
+  const router = useRouter()
+
+  useEffect(() => {
+    setSelected(window.location.pathname.includes(props.redirectLocation))
+  }, [])
+
+  return (
+    <HStack
+      alignment="center"
+      distribution="start"
+      css={{
+        pl: '10px',
+        mb: '2px',
+        gap: '10px',
+        display: 'flex',
+        width: '100%',
+        maxWidth: '100%',
+        height: '34px',
+
+        backgroundColor: selected ? '$thLibrarySelectionColor' : 'unset',
+        fontSize: '15px',
+        fontWeight: 'regular',
+        fontFamily: '$display',
+        color: selected
+          ? '$thLibraryMenuSecondary'
+          : '$thLibraryMenuUnselected',
+        verticalAlign: 'middle',
+        borderRadius: '3px',
+        cursor: 'pointer',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        '&:hover': {
+          backgroundColor: selected
+            ? '$thLibrarySelectionColor'
+            : '$thBackground4',
+        },
+        '&:active': {
+          backgroundColor: selected
+            ? '$thLibrarySelectionColor'
+            : '$thBackground4',
+        },
+      }}
+      title={props.text}
+      onClick={(e) => {
+        router.push(props.redirectLocation)
+        e.preventDefault()
+      }}
+    >
+      {props.icon}
+      {props.text}
+    </HStack>
+  )
+}
+
 function NavButton(props: NavButtonProps): JSX.Element {
   const isInboxFilter = (filter: string) => {
     return filter === '' || filter === 'in:inbox'
@@ -861,7 +935,7 @@ function LabelButton(props: LabelButtonProps): JSX.Element {
   const checkboxRef = useRef<HTMLInputElement | null>(null)
   const state = useMemo(() => {
     const term = props.searchTerm ?? ''
-    if (term.indexOf(`label:\"${props.label.name}\"`) >= 0) {
+    if (term.indexOf(`label:\"${escapeQuotes(props.label.name)}\"`) >= 0) {
       return 'on'
     }
     return 'off'
@@ -911,7 +985,7 @@ function LabelButton(props: LabelButtonProps): JSX.Element {
             props.applySearchQuery(query.trim())
           } else {
             props.applySearchQuery(
-              `${query.trim()} label:\"${props.label.name}\"`
+              `${query.trim()} label:\"${escapeQuotes(props.label.name)}\"`
             )
           }
         }}
@@ -930,14 +1004,15 @@ function LabelButton(props: LabelButtonProps): JSX.Element {
           type="checkbox"
           checked={state === 'on'}
           onChange={(e) => {
+            const escapedLabelName = escapeQuotes(props.label.name)
             if (e.target.checked) {
               props.applySearchQuery(
-                `${props.searchTerm ?? ''} label:\"${props.label.name}\"`
+                `${props.searchTerm ?? ''} label:\"${escapedLabelName}\"`
               )
             } else {
               const query =
                 props.searchTerm?.replace(
-                  `label:\"${props.label.name}\"`,
+                  `label:\"${escapedLabelName}\"`,
                   ''
                 ) ?? ''
               props.applySearchQuery(query)

@@ -115,6 +115,40 @@ export function Article(props: ArticleProps): JSX.Element {
     }
   }, 2500)
 
+  useEffect(() => {
+    const youtubePlayer = document.getElementById('_omnivore_youtube_video')
+
+    const updateScroll = () => {
+      const YOUTUBE_PLACEHOLDER_ID = 'omnivore-youtube-placeholder'
+      const youtubePlaceholder = document.getElementById(YOUTUBE_PLACEHOLDER_ID)
+
+      if (youtubePlayer) {
+        if (window.scrollY > 400) {
+          if (!youtubePlaceholder) {
+            const rect = youtubePlayer.getBoundingClientRect()
+            const placeholder = document.createElement('div')
+            placeholder.setAttribute('id', YOUTUBE_PLACEHOLDER_ID)
+            placeholder.style.width = rect.width + 'px'
+            placeholder.style.height = rect.height + 'px'
+            youtubePlayer.parentNode?.insertBefore(placeholder, youtubePlayer)
+          }
+          youtubePlayer.classList.add('is-sticky')
+        } else {
+          if (youtubePlaceholder) {
+            youtubePlayer.parentNode?.removeChild(youtubePlaceholder)
+          }
+          youtubePlayer.classList.remove('is-sticky')
+        }
+      }
+    }
+    if (youtubePlayer) {
+      window.addEventListener('scroll', updateScroll)
+    }
+    return () => {
+      window.removeEventListener('scroll', updateScroll) // clean up
+    }
+  }, [props])
+
   // Scroll to initial anchor position
   useEffect(() => {
     if (typeof window === 'undefined') {

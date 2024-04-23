@@ -6,7 +6,6 @@ import {
 import { VStack, HStack } from '../elements/LayoutPrimitives'
 import { Button } from '../elements/Button'
 import { StyledText } from '../elements/StyledText'
-import { useCallback } from 'react'
 
 type ConfirmationModalProps = {
   message?: string
@@ -19,18 +18,8 @@ type ConfirmationModalProps = {
 }
 
 export function ConfirmationModal(props: ConfirmationModalProps): JSX.Element {
-  const safeOnOpenChange = useCallback(
-    (open: boolean) => {
-      props.onOpenChange(open)
-      setTimeout(() => {
-        document.body.style.removeProperty('pointer-events')
-      }, 200)
-    },
-    [props]
-  )
-
   return (
-    <ModalRoot defaultOpen onOpenChange={safeOnOpenChange}>
+    <ModalRoot defaultOpen onOpenChange={props.onOpenChange}>
       <ModalOverlay />
       <ModalContent css={{ bg: '$grayBg', maxWidth: '20em', zIndex: '20' }}>
         <VStack alignment="center" distribution="center" css={{ p: '15px' }}>
@@ -56,15 +45,11 @@ export function ConfirmationModal(props: ConfirmationModalProps): JSX.Element {
             </Button>
             <Button
               style="ctaDarkYellow"
-              onClick={() => {
-                props.onAccept()
-                document.body.style.removeProperty('pointer-events')
-              }}
+              onClick={props.onAccept}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
                   event.preventDefault()
                   props.onAccept()
-                  document.body.style.removeProperty('pointer-events')
                 }
               }}
             >

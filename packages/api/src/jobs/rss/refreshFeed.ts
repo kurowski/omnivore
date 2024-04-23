@@ -48,12 +48,14 @@ export const isRefreshFeedRequest = (data: any): data is RefreshFeedRequest => {
 
 // link can be a string or an object
 type RssFeedItemLink = string | { $: { rel?: string; href: string } }
+type RssFeedItemAuthor = string | { name: string }
 type RssFeed = Parser.Output<{
   published?: string
   updated?: string
   created?: string
   link?: RssFeedItemLink
   links?: RssFeedItemLink[]
+  author?: RssFeedItemAuthor
 }> & {
   lastBuildDate?: string
   'syn:updatePeriod'?: string
@@ -190,22 +192,40 @@ export const fetchAndChecksum = async (url: string) => {
 
 const parseFeed = async (url: string, content: string) => {
   try {
-    // check if url is a telegram channel
-    const telegramRegex = /https:\/\/t\.me\/([a-zA-Z0-9_]+)/
+    // check if url is a telegram channel or preview
+    const telegramRegex = /t\.me\/([^/]+)/
     const telegramMatch = url.match(telegramRegex)
     if (telegramMatch) {
+      let channel = telegramMatch[1]
+      if (channel.startsWith('s/')) {
+        channel = channel.slice(2)
+      } else {
+        // open the preview page to get the data
+        const fetchResult = await fetchAndChecksum(`https://t.me/s/${channel}`)
+        if (!fetchResult) {
+          return null
+        }
+
+        content = fetchResult.content
+      }
+
       const dom = parseHTML(content).document
-      const title = dom.querySelector('meta[property="og:title"]')
+      const title =
+        dom
+          .querySelector('meta[property="og:title"]')
+          ?.getAttribute('content') || dom.title
       // post has attribute data-post
       const posts = dom.querySelectorAll('[data-post]')
       const items = Array.from(posts)
         .map((post) => {
-          const id = post.getAttribute('data-post')
+          const id = post.getAttribute('data-post')?.split('/')[1]
           if (!id) {
             return null
           }
 
-          const url = `https://t.me/${telegramMatch[1]}/${id}`
+          const url = `https://t.me/s/${channel}/${id}`
+          const content = post.outerHTML
+
           // find the <time> element
           const time = post.querySelector('time')
           const dateTime = time?.getAttribute('datetime') || undefined
@@ -213,12 +233,16 @@ const parseFeed = async (url: string, content: string) => {
           return {
             link: url,
             isoDate: dateTime,
+            title: `${title} - ${id}`,
+            creator: title,
+            content,
+            links: [url],
           }
         })
         .filter((item) => !!item) as RssFeedItem[]
 
       return {
-        title: title?.getAttribute('content') || dom.title,
+        title,
         items,
       }
     }
@@ -359,6 +383,7 @@ const createItemWithFeedContent = async (
         clientRequestId: '',
         author: item.creator,
         previewImage,
+        labels: [{ name: 'RSS' }],
       },
       user
     )
@@ -386,6 +411,7 @@ const parser = new Parser({
       'created',
       ['media:content', 'media:content', { keepArray: true }],
       ['media:thumbnail'],
+      'author',
     ],
     feed: [
       'lastBuildDate',
@@ -473,6 +499,14 @@ const getLink = (
   return url
 }
 
+// get author
+const getAuthor = (author: RssFeedItemAuthor) => {
+  if (typeof author === 'string') {
+    return author
+  }
+  return author.name
+}
+
 const processSubscription = async (
   fetchContentTasks: Map<string, FetchContentTask>,
   subscriptionId: string,
@@ -499,7 +533,7 @@ const processSubscription = async (
 
   // fetch feed
   let itemCount = 0,
-    failedAt: Date | undefined
+    failedAt: Date | null = null
 
   const feedLastBuildDate = feed.lastBuildDate
   logger.info(`Feed last build date ${feedLastBuildDate || 'N/A'}`)
@@ -536,10 +570,13 @@ const processSubscription = async (
         throw new Error('Invalid feed item link')
       }
 
+      const creator = item.creator || (item.author && getAuthor(item.author))
+
       const feedItem = {
         ...item,
         isoDate,
         link,
+        creator,
       }
 
       const publishedAt = feedItem.isoDate

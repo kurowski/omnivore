@@ -1,8 +1,10 @@
 import { gql } from 'graphql-request'
 import useSWR from 'swr'
+import { Feature, featureFragment } from '../fragments/featureFragment'
 import { publicGqlFetcher } from '../networkHelpers'
 
 type ViewerQueryResponse = {
+  mutate: () => void
   viewerData?: ViewerQueryResponseData
   viewerDataError?: unknown
   isLoading: boolean
@@ -20,7 +22,7 @@ export type UserBasicData = {
   email: string
   source: string
   intercomHash: string
-  features: string[]
+  featureList: Feature[]
 }
 
 export type UserProfile = {
@@ -46,14 +48,18 @@ export function useGetViewerQuery(): ViewerQueryResponse {
         email
         source
         intercomHash
-        features
+        featureList {
+          ...FeatureFields
+        }
       }
     }
+    ${featureFragment}
   `
 
-  const { data, error } = useSWR(query, publicGqlFetcher)
+  const { data, error, mutate } = useSWR(query, publicGqlFetcher)
 
   return {
+    mutate,
     viewerData: data as ViewerQueryResponseData,
     viewerDataError: error, // TODO: figure out error possibilities
     isLoading: !error && !data,

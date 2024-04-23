@@ -22,6 +22,8 @@ import {
   SearchItem,
   User,
 } from '../generated/graphql'
+import { getAISummary } from '../services/ai-summaries'
+import { findUserFeatures } from '../services/features'
 import { findHighlightsByLibraryItemId } from '../services/highlights'
 import { findLabelsByLibraryItemId } from '../services/labels'
 import { findRecommendationsByLibraryItemId } from '../services/recommendation'
@@ -39,6 +41,15 @@ import {
   generateUploadFilePathName,
 } from '../utils/uploads'
 import { emptyTrashResolver, fetchContentResolver } from './article'
+import {
+  addDiscoverFeedResolver,
+  deleteDiscoverArticleResolver,
+  deleteDiscoverFeedsResolver,
+  editDiscoverFeedsResolver,
+  getDiscoverFeedArticlesResolver,
+  getDiscoverFeedsResolver,
+  saveDiscoverArticleResolver,
+} from './discover_feeds'
 import { optInFeatureResolver } from './features'
 import { uploadImportFileResolver } from './importers/uploadImportFileResolver'
 import {
@@ -63,6 +74,7 @@ import {
   deleteRuleResolver,
   deleteWebhookResolver,
   deviceTokensResolver,
+  exportToIntegrationResolver,
   feedsResolver,
   filtersResolver,
   generateApiKeyResolver,
@@ -79,6 +91,7 @@ import {
   googleSignupResolver,
   groupsResolver,
   importFromIntegrationResolver,
+  integrationResolver,
   integrationsResolver,
   joinGroupResolver,
   labelsResolver,
@@ -137,12 +150,14 @@ import {
   webhookResolver,
   webhooksResolver,
 } from './index'
-import { markEmailAsItemResolver, recentEmailsResolver } from './recent_emails'
+import {
+  markEmailAsItemResolver,
+  recentEmailsResolver,
+  replyToEmailResolver,
+} from './recent_emails'
 import { recentSearchesResolver } from './recent_searches'
 import { WithDataSourcesContext } from './types'
 import { updateEmailResolver } from './user'
-import { getAISummary } from '../services/ai-summaries'
-import { findUserFeatures, getFeatureName } from '../services/features'
 
 /* eslint-disable @typescript-eslint/naming-convention */
 type ResultResolveType = {
@@ -295,13 +310,22 @@ export const functionResolvers = {
     updateSubscription: updateSubscriptionResolver,
     updateFilter: updateFilterResolver,
     updateEmail: updateEmailResolver,
+    saveDiscoverArticle: saveDiscoverArticleResolver,
+    deleteDiscoverArticle: deleteDiscoverArticleResolver,
     moveToFolder: moveToFolderResolver,
     updateNewsletterEmail: updateNewsletterEmailResolver,
+    addDiscoverFeed: addDiscoverFeedResolver,
+    deleteDiscoverFeed: deleteDiscoverFeedsResolver,
+    editDiscoverFeed: editDiscoverFeedsResolver,
     emptyTrash: emptyTrashResolver,
     fetchContent: fetchContentResolver,
+    exportToIntegration: exportToIntegrationResolver,
+    replyToEmail: replyToEmailResolver,
   },
   Query: {
     me: getMeUserResolver,
+    getDiscoverFeedArticles: getDiscoverFeedArticlesResolver,
+    discoverFeeds: getDiscoverFeedsResolver,
     user: getUserResolver,
     users: getAllUsersResolver,
     validateUsername: validateUsernameResolver,
@@ -332,6 +356,7 @@ export const functionResolvers = {
     recentEmails: recentEmailsResolver,
     feeds: feedsResolver,
     scanFeeds: scanFeedsResolver,
+    integration: integrationResolver,
   },
   User: {
     async intercomHash(
@@ -349,13 +374,25 @@ export const functionResolvers = {
       return undefined
     },
     async features(
-      user: User,
+      _: User,
       __: Record<string, unknown>,
       ctx: WithDataSourcesContext
     ) {
       if (!ctx.claims?.uid) {
         return undefined
       }
+
+      return []
+    },
+    async featureList(
+      _: User,
+      __: Record<string, unknown>,
+      ctx: WithDataSourcesContext
+    ) {
+      if (!ctx.claims?.uid) {
+        return undefined
+      }
+
       return findUserFeatures(ctx.claims.uid)
     },
   },
@@ -646,4 +683,7 @@ export const functionResolvers = {
   ...resultResolveTypeResolver('UpdateNewsletterEmail'),
   ...resultResolveTypeResolver('EmptyTrash'),
   ...resultResolveTypeResolver('FetchContent'),
+  ...resultResolveTypeResolver('Integration'),
+  ...resultResolveTypeResolver('ExportToIntegration'),
+  ...resultResolveTypeResolver('ReplyToEmail'),
 }

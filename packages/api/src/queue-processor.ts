@@ -5,6 +5,7 @@
 import {
   ConnectionOptions,
   Job,
+  JobState,
   JobType,
   Queue,
   QueueEvents,
@@ -13,6 +14,7 @@ import {
 import express, { Express } from 'express'
 import { appDataSource } from './data_source'
 import { env } from './env'
+import { TaskState } from './generated/graphql'
 import { aiSummarize, AI_SUMMARIZE_JOB_NAME } from './jobs/ai-summarize'
 import { bulkAction, BULK_ACTION_JOB_NAME } from './jobs/bulk_action'
 import { callWebhook, CALL_WEBHOOK_JOB_NAME } from './jobs/call_webhook'
@@ -25,9 +27,16 @@ import {
   exportItem,
   EXPORT_ITEM_JOB_NAME,
 } from './jobs/integration/export_item'
+import {
+  processYouTubeTranscript,
+  processYouTubeVideo,
+  PROCESS_YOUTUBE_TRANSCRIPT_JOB_NAME,
+  PROCESS_YOUTUBE_VIDEO_JOB_NAME,
+} from './jobs/process-youtube-video'
 import { refreshAllFeeds } from './jobs/rss/refreshAllFeeds'
 import { refreshFeed } from './jobs/rss/refreshFeed'
 import { savePageJob } from './jobs/save_page'
+import { sendEmailJob, SEND_EMAIL_JOB } from './jobs/email/send_email'
 import {
   syncReadPositionsJob,
   SYNC_READ_POSITIONS_JOB_NAME,
@@ -44,6 +53,16 @@ import { redisDataSource } from './redis_data_source'
 import { CACHED_READING_POSITION_PREFIX } from './services/cached_reading_position'
 import { getJobPriority } from './utils/createTask'
 import { logger } from './utils/logger'
+import {
+  confirmEmailJob,
+  CONFIRM_EMAIL_JOB,
+  forwardEmailJob,
+  FORWARD_EMAIL_JOB,
+  saveAttachmentJob,
+  saveNewsletterJob,
+  SAVE_ATTACHMENT_JOB,
+  SAVE_NEWSLETTER_JOB,
+} from './jobs/email/inbound_emails'
 
 export const QUEUE_NAME = 'omnivore-backend-queue'
 export const JOB_VERSION = 'v001'
@@ -74,6 +93,33 @@ export const getBackendQueue = async (): Promise<Queue | undefined> => {
   })
   await backendQueue.waitUntilReady()
   return backendQueue
+}
+
+export const getJob = async (jobId: string) => {
+  const queue = await getBackendQueue()
+  if (!queue) {
+    return
+  }
+  return queue.getJob(jobId)
+}
+
+export const jobStateToTaskState = (
+  jobState: JobState | 'unknown'
+): TaskState => {
+  switch (jobState) {
+    case 'completed':
+      return TaskState.Succeeded
+    case 'failed':
+      return TaskState.Failed
+    case 'active':
+      return TaskState.Running
+    case 'delayed':
+      return TaskState.Pending
+    case 'waiting':
+      return TaskState.Pending
+    default:
+      return TaskState.Pending
+  }
 }
 
 export const createWorker = (connection: ConnectionOptions) =>
@@ -116,8 +162,24 @@ export const createWorker = (connection: ConnectionOptions) =>
           return exportItem(job.data)
         case AI_SUMMARIZE_JOB_NAME:
           return aiSummarize(job.data)
+        case PROCESS_YOUTUBE_VIDEO_JOB_NAME:
+          return processYouTubeVideo(job.data)
+        case PROCESS_YOUTUBE_TRANSCRIPT_JOB_NAME:
+          return processYouTubeTranscript(job.data)
         case EXPORT_ALL_ITEMS_JOB_NAME:
           return exportAllItems(job.data)
+        case SEND_EMAIL_JOB:
+          return sendEmailJob(job.data)
+        case CONFIRM_EMAIL_JOB:
+          return confirmEmailJob(job.data)
+        case SAVE_ATTACHMENT_JOB:
+          return saveAttachmentJob(job.data)
+        case SAVE_NEWSLETTER_JOB:
+          return saveNewsletterJob(job.data)
+        case FORWARD_EMAIL_JOB:
+          return forwardEmailJob(job.data)
+        default:
+          logger.warning(`[queue-processor] unhandled job: ${job.name}`)
       }
     },
     {
@@ -174,7 +236,6 @@ const main = async () => {
     let output = ''
     const metrics: JobType[] = ['active', 'failed', 'completed', 'prioritized']
     const counts = await queue.getJobCounts(...metrics)
-    console.log('counts: ', counts)
 
     metrics.forEach((metric, idx) => {
       output += `# TYPE omnivore_queue_messages_${metric} gauge\n`
@@ -199,6 +260,18 @@ const main = async () => {
         output += `# TYPE omnivore_read_position_messages gauge\n`
         output += `omnivore_read_position_messages{} ${batch.length}\n`
       }
+    }
+
+    // Export the age of the oldest prioritized job in the queue
+    const oldestJobs = await queue.getJobs(['prioritized'], 0, 1, true)
+    if (oldestJobs.length > 0) {
+      const currentTime = Date.now()
+      const ageInSeconds = (currentTime - oldestJobs[0].timestamp) / 1000
+      output += `# TYPE omnivore_queue_messages_oldest_job_age_seconds gauge\n`
+      output += `omnivore_queue_messages_oldest_job_age_seconds{queue="${QUEUE_NAME}"} ${ageInSeconds}\n`
+    } else {
+      output += `# TYPE omnivore_queue_messages_oldest_job_age_seconds gauge\n`
+      output += `omnivore_queue_messages_oldest_job_age_seconds{queue="${QUEUE_NAME}"} ${0}\n`
     }
 
     res.status(200).setHeader('Content-Type', 'text/plain').send(output)
@@ -249,8 +322,19 @@ const main = async () => {
 
   const gracefulShutdown = async (signal: string) => {
     console.log(`[queue-processor]: Received ${signal}, closing server...`)
+    await new Promise<void>((resolve) => {
+      server.close((err) => {
+        console.log('[queue-processor]: Express server closed')
+        if (err) {
+          console.log('[queue-processor]: error stopping server', { err })
+        }
+
+        resolve()
+      })
+    })
     await worker.close()
     await redisDataSource.shutdown()
+    await appDataSource.destroy()
     process.exit(0)
   }
 

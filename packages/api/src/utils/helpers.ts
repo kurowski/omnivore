@@ -10,7 +10,6 @@ import { Highlight as HighlightData } from '../entity/highlight'
 import { LibraryItem, LibraryItemState } from '../entity/library_item'
 import { Recommendation as RecommendationData } from '../entity/recommendation'
 import { RegistrationType, User } from '../entity/user'
-import { env } from '../env'
 import {
   Article,
   ArticleSavingRequest,
@@ -368,7 +367,10 @@ export const cleanUrl = (url: string) => {
   })
 }
 
-export const deepDelete = <T, K extends keyof T>(obj: T, keys: K[]) => {
+export const deepDelete = <T, K extends keyof T>(
+  obj: T,
+  keys: readonly K[]
+) => {
   // make a copy of the object
   const copy = { ...obj }
 
@@ -404,6 +406,3 @@ export const setRecentlySavedItemInRedis = async (
     })
   }
 }
-
-export const highlightUrl = (slug: string, highlightId: string): string =>
-  `${env.client.url}/me/${slug}#${highlightId}`
